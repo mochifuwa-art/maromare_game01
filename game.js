@@ -96,15 +96,15 @@ const ENEMIES = {
 
 // ---------- ステージ進行 ----------
 const STAGE_ORDER = [
-  { type: 'combat', enemyId: 'water_slime',   label: '1-1' },
-  { type: 'combat', enemyId: 'wind_sprite',   label: '1-2' },
-  { type: 'combat', enemyId: 'earth_pebble',  label: '1-3' },
+  { type: 'combat', enemyId: 'water_slime',   label: '1-1', turns: 2 },
+  { type: 'combat', enemyId: 'wind_sprite',   label: '1-2', turns: 3 },
+  { type: 'combat', enemyId: 'earth_pebble',  label: '1-3', turns: 3 },
   { type: 'reward', label: '報酬' },
-  { type: 'combat', enemyId: 'fire_imp',      label: '2-1' },
-  { type: 'combat', enemyId: 'water_serpent', label: '2-2' },
-  { type: 'combat', enemyId: 'thunder_kite',  label: '2-3' },
+  { type: 'combat', enemyId: 'fire_imp',      label: '2-1', turns: 3 },
+  { type: 'combat', enemyId: 'water_serpent', label: '2-2', turns: 4 },
+  { type: 'combat', enemyId: 'thunder_kite',  label: '2-3', turns: 4 },
   { type: 'shop',   label: 'ショップ' },
-  { type: 'combat', enemyId: 'boss_chimera',  label: 'BOSS', isBoss: true },
+  { type: 'combat', enemyId: 'boss_chimera',  label: 'BOSS', isBoss: true, turns: 6 },
 ];
 
 // ---------- スタートデッキ ----------
@@ -121,9 +121,11 @@ const STARTER_DECK_IDS = [
 const state = {
   character: null,
   deck: [],
-  drawPile: [],
-  discardPile: [],
-  hand: [],
+  drawPile: [],         // cardId の配列
+  discardPile: [],      // cardId の配列
+  hand: [],             // { instanceId, cardId } の配列
+  queue: [],            // 選択した instanceId の配列（発動順）
+  executing: false,     // 発動中フラグ（UI ロック）
   mp: 40,
   mpMax: 40,
   focusBuff: false,
@@ -131,8 +133,18 @@ const state = {
   enemyMaxHp: 0,
   stageIndex: 0,
   gold: 0,
-  shopState: null,  // { items, removeMode }
+  turnsLeft: 0,
+  maxTurns: 0,
+  shopState: null,
 };
+
+let _nextInstanceId = 1;
+function mkInstance(cardId) {
+  return { instanceId: _nextInstanceId++, cardId };
+}
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
 
 // ============================================================
 //   ロジック関数
@@ -206,18 +218,22 @@ function shuffle(arr) {
   return a;
 }
 
-function startCombat(enemyId) {
-  const e = ENEMIES[enemyId];
+function startCombat(stage) {
+  const e = ENEMIES[stage.enemyId];
   state.enemy = { ...e, currentHp: e.hp };
   state.enemyMaxHp = e.hp;
   state.mp = state.mpMax;
   state.focusBuff = false;
+  state.queue = [];
+  state.executing = false;
+  state.maxTurns = stage.turns;
+  state.turnsLeft = stage.turns;
   state.drawPile = shuffle(state.deck.slice());
   state.discardPile = [];
   state.hand = [];
   drawHand();
   renderCombat();
-  log(`<span class="system">— ${e.name} が現れた！ —</span>`);
+  log(`<span class="system">— ${e.name} が現れた！（${stage.turns}ターン以内に撃破せよ）—</span>`);
 }
 
 function drawHand() {
@@ -238,78 +254,149 @@ function drawHand() {
         continue;
       }
     }
-    state.hand.push(cardId);
+    state.hand.push(mkInstance(cardId));
   }
   // スキップしたカードはターン後の捨て山へ（同一サイクル内で再評価されないように）
   state.discardPile.push(...skipped);
 }
 
 function endTurn() {
-  state.discardPile.push(...state.hand);
+  if (state.executing) return;
+  state.discardPile.push(...state.hand.map(h => h.cardId));
   state.hand = [];
+  state.queue = [];
   state.mp = state.mpMax;
   state.focusBuff = false;
+  state.turnsLeft--;
+  if (state.turnsLeft <= 0) {
+    log('<span class="awaken">— ターンが尽きた… —</span>');
+    setTimeout(() => showEndScreen(false), 700);
+    return;
+  }
+  log(`<span class="system">— ターン終了（残り ${state.turnsLeft} ターン）—</span>`);
   drawHand();
   renderCombat();
-  log('<span class="system">— ターン終了 —</span>');
 }
 
 // ============================================================
-//   カード使用
+//   選択キュー
 // ============================================================
-function playCard(handIndex) {
-  const cardId = state.hand[handIndex];
+function getAvailableMP() {
+  return state.mp - state.queue.reduce((sum, id) => {
+    const inst = state.hand.find(h => h.instanceId === id);
+    if (!inst) return sum;
+    const c = CARD_BY_ID[inst.cardId];
+    return sum + calcCost(c, state.character);
+  }, 0);
+}
+
+function toggleQueue(instanceId) {
+  if (state.executing) return;
+  const pos = state.queue.indexOf(instanceId);
+  if (pos >= 0) {
+    state.queue.splice(pos, 1);
+  } else {
+    const inst = state.hand.find(h => h.instanceId === instanceId);
+    if (!inst) return;
+    const card = CARD_BY_ID[inst.cardId];
+    const cost = calcCost(card, state.character);
+    if (cost > getAvailableMP()) return;
+    state.queue.push(instanceId);
+  }
+  renderCombat();
+}
+
+function clearQueue() {
+  if (state.executing) return;
+  state.queue = [];
+  renderCombat();
+}
+
+// ============================================================
+//   発動（カード使用）
+// ============================================================
+async function executeQueue() {
+  if (state.executing || state.queue.length === 0) return;
+  state.executing = true;
+  const ids = state.queue.slice();
+  state.queue = [];
+  renderCombat();
+
+  for (let i = 0; i < ids.length; i++) {
+    const instId = ids[i];
+    const inst = state.hand.find(h => h.instanceId === instId);
+    if (!inst) continue;
+    const cardId = inst.cardId;
+    // 手札から取り除く
+    state.hand = state.hand.filter(h => h.instanceId !== instId);
+    await playCardEffect(cardId, i + 1, ids.length);
+    renderCombat();
+    if (state.enemy.currentHp <= 0) break;
+    await sleep(ids.length > 1 ? 360 : 0);
+  }
+
+  state.executing = false;
+  if (state.enemy.currentHp <= 0) {
+    onEnemyDefeated();
+  } else {
+    renderCombat();
+  }
+}
+
+async function playCardEffect(cardId, comboIdx, comboTotal) {
   const card = CARD_BY_ID[cardId];
-  const cost = calcCost(card, state.character);
-  if (state.mp < cost) return; // 念のため
-
+  // 発動時点での状態で再計算（覚醒連鎖を考慮）
   const wasAwaken = isAwaken(card, state.character);
-  state.mp -= cost;
+  const cost = calcCost(card, state.character);
+  state.mp = Math.max(0, state.mp - cost);
+  state.discardPile.push(cardId);
 
-  // 効果適用
+  if (comboTotal >= 2) showCombo(comboIdx);
+
   if (card.special === 'focus') {
     state.focusBuff = true;
     log(`<span class="system">${state.character.name} は集中した（次撃+20）</span>`);
-  } else {
-    const hits = card.hits || 1;
-    const useFocus = state.focusBuff;
-    let totalDmg = 0;
-    for (let i = 0; i < hits; i++) {
-      let dmg = calcPower(card, state.character, useFocus);
-      const mult = elementMultiplier(card, state.enemy);
-      dmg = Math.round(dmg * mult);
-      applyDamage(dmg, mult, wasAwaken);
-      totalDmg += dmg;
-    }
-    if (useFocus) state.focusBuff = false;
-    log(`<span>${state.character.name} の <strong>${card.name}</strong> → <span class="dmg">${totalDmg}</span> ダメージ</span>`);
+    return;
   }
+
+  const hits = card.hits || 1;
+  const useFocus = state.focusBuff;
+  let totalDmg = 0;
+  for (let i = 0; i < hits; i++) {
+    let dmg = calcPower(card, state.character, useFocus);
+    const mult = elementMultiplier(card, state.enemy);
+    dmg = Math.round(dmg * mult);
+    applyDamage(dmg, mult, wasAwaken);
+    totalDmg += dmg;
+    if (i < hits - 1) await sleep(130);
+  }
+  if (useFocus) state.focusBuff = false;
+
+  const tag = wasAwaken ? ' <span class="awaken">⚡覚醒</span>' : '';
+  log(`<span><strong>${card.name}</strong> → <span class="dmg">${totalDmg}</span>${tag}</span>`);
 
   // 苦労値の更新 / 覚醒消費
   if (card.element[0] !== 'none') {
     const el = card.element[0];
     if (wasAwaken) {
-      log(`<span class="awaken">⚡ ${ELEMENT_NAME[el]}覚醒を発動！苦労値リセット ⚡</span>`);
       state.character.exhaustion[el] = 0;
     } else {
       const add = Math.max(0, 100 - state.character.aptitude[el]);
       state.character.exhaustion[el] = Math.min(100, state.character.exhaustion[el] + add);
       if (state.character.exhaustion[el] >= 100) {
-        log(`<span class="awaken">✨ ${ELEMENT_NAME[el]}属性が覚醒状態に！次の${ELEMENT_NAME[el]}カードはコスト0・威力3倍 ✨</span>`);
+        log(`<span class="awaken">✨ ${ELEMENT_NAME[el]}属性が覚醒状態に！</span>`);
       }
     }
   }
+}
 
-  // 手札から除外して捨て山へ
-  state.hand.splice(handIndex, 1);
-  state.discardPile.push(cardId);
-
-  // 敵撃破？
-  if (state.enemy.currentHp <= 0) {
-    onEnemyDefeated();
-    return;
-  }
-  renderCombat();
+function showCombo(idx) {
+  const wrap = document.getElementById('floating-damage');
+  const el = document.createElement('div');
+  el.className = 'combo-popup';
+  el.textContent = `COMBO ×${idx}`;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 800);
 }
 
 function applyDamage(dmg, mult, wasAwaken) {
@@ -373,7 +460,7 @@ function proceedStage() {
   }
   if (stage.type === 'combat') {
     showScreen('combat-screen');
-    startCombat(stage.enemyId);
+    startCombat(stage);
     updateStageLabel();
   } else if (stage.type === 'reward') {
     showRewardScreen();
@@ -413,9 +500,18 @@ function renderCombat() {
   if (e.resistance) aff.innerHTML += `<span class="affinity-tag resist">${ELEMENT_ICON[e.resistance]} 耐性 ${ELEMENT_NAME[e.resistance]}</span>`;
   if (e.immune) aff.innerHTML += `<span class="affinity-tag immune">${ELEMENT_ICON[e.immune]} 無効 ${ELEMENT_NAME[e.immune]}</span>`;
 
-  // MP
-  document.getElementById('mp-text').textContent = `${state.mp} / ${state.mpMax}`;
-  document.getElementById('mp-fill').style.width = (state.mp / state.mpMax * 100) + '%';
+  // ターンカウンタ
+  const tc = document.getElementById('turn-counter');
+  tc.textContent = `残り ${state.turnsLeft} / ${state.maxTurns} ターン`;
+  tc.classList.toggle('danger', state.turnsLeft <= 1);
+
+  // MP（キュー消費を考慮した実効MP表示）
+  const usedByQueue = state.mp - getAvailableMP();
+  const availableMP = getAvailableMP();
+  document.getElementById('mp-text').textContent = state.queue.length > 0
+    ? `${availableMP} (-${usedByQueue}) / ${state.mpMax}`
+    : `${state.mp} / ${state.mpMax}`;
+  document.getElementById('mp-fill').style.width = (availableMP / state.mpMax * 100) + '%';
 
   // デッキ
   document.getElementById('draw-count').textContent = state.drawPile.length;
@@ -426,17 +522,42 @@ function renderCombat() {
   // 手札
   const handArea = document.getElementById('hand-area');
   handArea.innerHTML = '';
-  state.hand.forEach((cardId, idx) => {
-    const card = CARD_BY_ID[cardId];
-    const el = renderCard(card, idx);
+  state.hand.forEach((inst) => {
+    const card = CARD_BY_ID[inst.cardId];
+    const cost = calcCost(card, state.character);
+    const queueIdx = state.queue.indexOf(inst.instanceId);
+    const inQueue = queueIdx >= 0;
+    const canAdd = inQueue || cost <= getAvailableMP();
+    const el = renderCard(card, {
+      selected: inQueue,
+      queueOrder: inQueue ? queueIdx + 1 : null,
+      unaffordable: !canAdd,
+    });
+    if (state.executing) el.classList.add('locked');
+    else el.addEventListener('click', () => toggleQueue(inst.instanceId));
     handArea.appendChild(el);
   });
+
+  // キューバー
+  const queueCount = document.getElementById('queue-count');
+  const queueCost = document.getElementById('queue-cost');
+  if (queueCount && queueCost) {
+    queueCount.textContent = state.queue.length;
+    queueCost.textContent = state.mp - getAvailableMP();
+  }
+  const execBtn = document.getElementById('execute-btn');
+  if (execBtn) execBtn.disabled = state.queue.length === 0 || state.executing;
+  const clearBtn = document.getElementById('clear-btn');
+  if (clearBtn) clearBtn.disabled = state.queue.length === 0 || state.executing;
+  const endBtn = document.getElementById('end-turn-btn');
+  if (endBtn) endBtn.disabled = state.executing;
 
   // キャラ
   renderCharacterPanel();
 }
 
-function renderCard(card, handIndex) {
+function renderCard(card, opts = {}) {
+  const { selected = false, queueOrder = null, unaffordable = false } = opts;
   const cost = calcCost(card, state.character);
   const power = calcPower(card, state.character, state.focusBuff);
   const wrap = document.createElement('div');
@@ -444,7 +565,8 @@ function renderCard(card, handIndex) {
   wrap.className = 'card ' + primaryEl + '-card';
   if (card.rarity === 'rare') wrap.classList.add('rare-card');
   if (card.rarity === 'awaken' || isAwaken(card, state.character)) wrap.classList.add('awaken-card');
-  if (state.mp < cost) wrap.classList.add('unaffordable');
+  if (unaffordable) wrap.classList.add('unaffordable');
+  if (selected) wrap.classList.add('selected');
 
   // 要素表示（複合は2つ）
   const icons = card.element.map(e => ELEMENT_ICON[e] || '').join('');
@@ -458,8 +580,13 @@ function renderCard(card, handIndex) {
   const dmgLabel = card.special === 'focus' ? '—' :
     (card.hits ? `${power}×${card.hits}` : power);
 
+  const orderBadge = (selected && queueOrder)
+    ? `<div class="queue-order">${queueOrder}</div>`
+    : '';
+
   wrap.innerHTML = `
     ${rarityTag}
+    ${orderBadge}
     <div class="card-element">${icons}</div>
     <div class="card-name">${card.name}</div>
     <div class="card-stats">
@@ -468,9 +595,6 @@ function renderCard(card, handIndex) {
     </div>
     <div class="card-desc">${card.desc}</div>
   `;
-  if (handIndex !== undefined && state.mp >= cost) {
-    wrap.addEventListener('click', () => playCard(handIndex));
-  }
   return wrap;
 }
 
@@ -707,9 +831,10 @@ function showEndScreen(win) {
   const t = document.getElementById('end-title');
   t.textContent = win ? 'VICTORY' : 'DEFEAT';
   t.classList.toggle('lose', !win);
+  const stage = STAGE_ORDER[state.stageIndex];
   document.getElementById('end-message').innerHTML = win
     ? `${state.character.name} は四元キメラを討伐した！<br>所持G: ${state.gold}　デッキ枚数: ${state.deck.length}枚`
-    : '挑戦は終わった。';
+    : `${state.enemy ? state.enemy.name : '敵'} を倒し切れなかった…<br>到達: Stage ${stage ? stage.label : '?'}　所持G: ${state.gold}`;
 }
 
 // ============================================================
@@ -727,6 +852,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('start-btn').addEventListener('click', showCharacterSelect);
   document.getElementById('restart-btn').addEventListener('click', () => showScreen('title-screen'));
   document.getElementById('end-turn-btn').addEventListener('click', endTurn);
+  document.getElementById('execute-btn').addEventListener('click', executeQueue);
+  document.getElementById('clear-btn').addEventListener('click', clearQueue);
   document.getElementById('character-panel').addEventListener('click', showCharacterDetail);
   document.getElementById('close-detail').addEventListener('click', () => {
     document.getElementById('detail-panel').classList.add('hidden');
