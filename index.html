@@ -33,6 +33,7 @@
       <div class="combat-top">
         <div class="stage-info">
           <span id="stage-label">Stage 1-1</span>
+          <span id="turn-counter">残り — ターン</span>
           <span id="run-progress"></span>
         </div>
         <div class="enemy-area">
@@ -70,9 +71,15 @@
 
       <div id="hand-area" class="hand-area"></div>
 
+      <div class="queue-bar">
+        <span class="queue-info"><strong id="queue-count">0</strong> 枚選択 / <strong id="queue-cost">0</strong> MP消費予定</span>
+        <button id="execute-btn" class="primary-btn execute-btn">⚡ 発動</button>
+        <button id="clear-btn" class="secondary-btn">クリア</button>
+      </div>
+
       <div class="combat-bottom">
         <div id="character-panel" class="character-panel"></div>
-        <button id="end-turn-btn" class="primary-btn">ターン終了</button>
+        <button id="end-turn-btn" class="secondary-btn">ターン終了</button>
       </div>
 
       <!-- Detail panel (toggled) -->
