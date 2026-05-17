@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>APTITUDE v0.1</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Title Screen -->
+    <section id="title-screen" class="screen active">
+      <div class="title-wrap">
+        <h1 class="title-main">APTITUDE</h1>
+        <p class="title-sub">適性 — 得意なことほど、コストがかからない</p>
+        <p class="title-version">v0.1 — ローグライク / デッキビルダー</p>
+        <button class="primary-btn" id="start-btn">ランを開始</button>
+        <div class="title-hint">
+          <p>4属性（火・水・風・土）の適性でカードコストが変動</p>
+          <p>不得意なほど苦労が溜まり、限界で覚醒する</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Character Select -->
+    <section id="character-select-screen" class="screen">
+      <h2 class="screen-title">キャラクターを選択</h2>
+      <div id="character-choices" class="choices-grid"></div>
+    </section>
+
+    <!-- Combat -->
+    <section id="combat-screen" class="screen">
+      <div class="combat-top">
+        <div class="stage-info">
+          <span id="stage-label">Stage 1-1</span>
+          <span id="run-progress"></span>
+        </div>
+        <div class="enemy-area">
+          <div id="enemy-visual" class="enemy-visual"></div>
+          <div class="enemy-info">
+            <div id="enemy-name" class="enemy-name"></div>
+            <div class="hp-bar-wrap">
+              <div id="enemy-hp-fill" class="hp-bar-fill"></div>
+              <div id="enemy-hp-text" class="hp-bar-text"></div>
+            </div>
+            <div id="enemy-affinity" class="enemy-affinity"></div>
+          </div>
+        </div>
+        <div id="floating-damage" class="floating-damage"></div>
+      </div>
+
+      <div class="play-zone">
+        <div id="play-log" class="play-log"></div>
+      </div>
+
+      <div class="combat-mid">
+        <div class="mp-area">
+          <span class="mp-label">MP</span>
+          <div class="mp-bar-wrap">
+            <div id="mp-fill" class="mp-bar-fill"></div>
+            <div id="mp-text" class="mp-bar-text"></div>
+          </div>
+        </div>
+        <div class="deck-stats">
+          <span>デッキ残り: <strong id="draw-count">0</strong></span>
+          <span>捨て山: <strong id="discard-count">0</strong></span>
+          <span id="focus-indicator" class="focus-indicator hidden">✨集中中（次撃+20）</span>
+        </div>
+      </div>
+
+      <div id="hand-area" class="hand-area"></div>
+
+      <div class="combat-bottom">
+        <div id="character-panel" class="character-panel"></div>
+        <button id="end-turn-btn" class="primary-btn">ターン終了</button>
+      </div>
+
+      <!-- Detail panel (toggled) -->
+      <div id="detail-panel" class="detail-panel hidden">
+        <div class="detail-content">
+          <button class="close-btn" id="close-detail">×</button>
+          <div id="detail-body"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Reward Screen -->
+    <section id="reward-screen" class="screen">
+      <h2 class="screen-title">カード報酬</h2>
+      <p class="screen-sub">1枚を選んでデッキに追加（スキップも可）</p>
+      <div id="reward-choices" class="choices-grid"></div>
+      <button id="skip-reward-btn" class="secondary-btn">スキップ</button>
+    </section>
+
+    <!-- Shop Screen -->
+    <section id="shop-screen" class="screen">
+      <h2 class="screen-title">ショップ</h2>
+      <div class="shop-gold">所持ゴールド: <strong id="shop-gold">0</strong> G</div>
+      <div id="shop-items" class="choices-grid"></div>
+      <div class="shop-actions">
+        <button id="remove-card-btn" class="secondary-btn">カードを除外 (30G)</button>
+        <button id="leave-shop-btn" class="primary-btn">ショップを出る</button>
+      </div>
+      <div id="remove-list" class="remove-list hidden">
+        <h3>除外するカードを選択</h3>
+        <div id="remove-cards"></div>
+        <button id="cancel-remove-btn" class="secondary-btn">キャンセル</button>
+      </div>
+    </section>
+
+    <!-- End Screen -->
+    <section id="end-screen" class="screen">
+      <h2 id="end-title" class="screen-title"></h2>
+      <p id="end-message" class="screen-sub"></p>
+      <button id="restart-btn" class="primary-btn">タイトルへ戻る</button>
+    </section>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
