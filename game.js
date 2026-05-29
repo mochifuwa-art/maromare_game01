@@ -88,6 +88,8 @@ let _nextInstanceId = 1;
 const mkInstance = (cardId) => ({ instanceId: _nextInstanceId++, cardId });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const $ = (id) => document.getElementById(id);
+// 要素が存在するときだけイベント登録（HTML/JSのバージョン不一致でも全体が止まらないように）
+const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
 
 // ============================================================
 //   サウンド（Web Audio で合成、ファイル不要）
@@ -221,6 +223,9 @@ function resumeRun() {
   Object.assign(state, run.state);
   state.executing = false;
   state.queue = [];
+  // 旧バージョンのセーブデータに無いフィールドを補完
+  if (state.maxRedraws == null) state.maxRedraws = 2;
+  if (state.redrawsLeft == null) state.redrawsLeft = state.maxRedraws;
   SOUND.init();
   if (run.screen === 'reward') { showRewardScreen(); }
   else if (run.screen === 'shop') { showShopScreen(); }
@@ -1003,26 +1008,26 @@ function showScreen(id) {
 document.addEventListener('DOMContentLoaded', () => {
   updateMuteButtons();
   renderTitleStats();
-  $('start-btn').addEventListener('click', () => { SOUND.init(); showCharacterSelect(); });
-  $('continue-btn').addEventListener('click', resumeRun);
-  $('records-btn').addEventListener('click', showRecords);
-  $('close-records').addEventListener('click', () => $('records-panel').classList.add('hidden'));
-  $('records-panel').addEventListener('click', (e) => { if (e.target.id === 'records-panel') $('records-panel').classList.add('hidden'); });
-  $('restart-btn').addEventListener('click', () => { showScreen('title-screen'); renderTitleStats(); });
-  $('end-turn-btn').addEventListener('click', endTurn);
-  $('execute-btn').addEventListener('click', executeQueue);
-  $('swap-btn').addEventListener('click', swapSelected);
-  $('character-panel').addEventListener('click', showCharacterDetail);
-  $('close-detail').addEventListener('click', () => $('detail-panel').classList.add('hidden'));
-  $('detail-panel').addEventListener('click', (e) => { if (e.target.id === 'detail-panel') $('detail-panel').classList.add('hidden'); });
-  $('mute-btn').addEventListener('click', () => SOUND.toggle());
-  $('mute-btn-title').addEventListener('click', () => { SOUND.init(); SOUND.toggle(); });
-  $('skip-reward-btn').addEventListener('click', () => { state.stageIndex++; proceedStage(); });
-  $('leave-shop-btn').addEventListener('click', () => { state.stageIndex++; proceedStage(); });
-  $('remove-card-btn').addEventListener('click', () => {
+  on('start-btn', 'click', () => { SOUND.init(); showCharacterSelect(); });
+  on('continue-btn', 'click', resumeRun);
+  on('records-btn', 'click', showRecords);
+  on('close-records', 'click', () => $('records-panel').classList.add('hidden'));
+  on('records-panel', 'click', (e) => { if (e.target.id === 'records-panel') $('records-panel').classList.add('hidden'); });
+  on('restart-btn', 'click', () => { showScreen('title-screen'); renderTitleStats(); });
+  on('end-turn-btn', 'click', endTurn);
+  on('execute-btn', 'click', executeQueue);
+  on('swap-btn', 'click', swapSelected);
+  on('character-panel', 'click', showCharacterDetail);
+  on('close-detail', 'click', () => $('detail-panel').classList.add('hidden'));
+  on('detail-panel', 'click', (e) => { if (e.target.id === 'detail-panel') $('detail-panel').classList.add('hidden'); });
+  on('mute-btn', 'click', () => SOUND.toggle());
+  on('mute-btn-title', 'click', () => { SOUND.init(); SOUND.toggle(); });
+  on('skip-reward-btn', 'click', () => { state.stageIndex++; proceedStage(); });
+  on('leave-shop-btn', 'click', () => { state.stageIndex++; proceedStage(); });
+  on('remove-card-btn', 'click', () => {
     if (state.gold < 30) { SOUND.sfx('error'); return; }
     if (state.deck.length <= 4) { SOUND.sfx('error'); return; }
     showRemoveList();
   });
-  $('cancel-remove-btn').addEventListener('click', () => $('remove-list').classList.add('hidden'));
+  on('cancel-remove-btn', 'click', () => $('remove-list').classList.add('hidden'));
 });
