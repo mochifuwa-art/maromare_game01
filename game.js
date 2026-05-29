@@ -399,6 +399,9 @@ async function executeQueue() {
   if (ids.length > META.maxCombo) { META.maxCombo = ids.length; SAVE.saveMeta(META); }
   renderCombat();
 
+  // チェーン状態（連撃・属性連鎖・同名ボーナス）
+  const chain = { step: 0, prevEl: null, run: 0, used: new Set() };
+
   for (let i = 0; i < ids.length; i++) {
     const inst = state.hand.find(h => h.instanceId === ids[i]);
     if (!inst) continue;
@@ -408,7 +411,7 @@ async function executeQueue() {
     if (cardEl) { cardEl.classList.add('firing'); }
     await sleep(160);
     state.hand = state.hand.filter(h => h.instanceId !== ids[i]);
-    await playCardEffect(cardId, i + 1, ids.length);
+    await playCardEffect(cardId, i + 1, ids.length, chain);
     renderCombat();
     if (state.enemy.currentHp <= 0) break;
     await sleep(ids.length > 1 ? 340 : 120);
@@ -419,7 +422,7 @@ async function executeQueue() {
   else { renderCombat(); saveRun('combat'); }
 }
 
-async function playCardEffect(cardId, comboIdx, comboTotal) {
+async function playCardEffect(cardId, comboIdx, comboTotal, chain) {
   const card = CARD_BY_ID[cardId];
   const char = state.character;
   const wasAwaken = isAwaken(card, char);
@@ -427,11 +430,9 @@ async function playCardEffect(cardId, comboIdx, comboTotal) {
   state.mp = Math.max(0, state.mp - cost);
   state.discardPile.push(cardId);
 
-  if (comboTotal >= 2) { showCombo(comboIdx); SOUND.sfx('combo'); }
-
   const mainEl = card.element[0];
 
-  // 集中
+  // 集中（チェーンには影響しない＝属性連鎖を途切れさせない）
   if (card.special === 'focus') {
     state.focusBuff = true;
     spawnEffect('none');
@@ -444,34 +445,60 @@ async function playCardEffect(cardId, comboIdx, comboTotal) {
   const hits = card.hits || 1;
   const useFocus = state.focusBuff;
   const mult = elementMultiplier(card, state.enemy);
+
+  // ---- チェーンボーナス計算 ----
+  let comboStep = 0, elementRun = 1, sameCard = false;
+  if (chain) {
+    comboStep = chain.step;                                   // この発動内で既に撃った攻撃数
+    elementRun = (chain.prevEl === mainEl) ? chain.run + 1 : 1; // 属性連続数
+    sameCard = chain.used.has(cardId);                        // 同名カード既出
+    chain.step++;
+    chain.prevEl = mainEl;
+    chain.run = elementRun;
+    chain.used.add(cardId);
+  }
+  const comboBonus   = comboStep * 0.10;        // 連撃: +10%/枚
+  const elementBonus = (elementRun - 1) * 0.20; // 属性連鎖: +20%/連続
+  const sameBonus    = sameCard ? 0.15 : 0;     // 同名: +15%
+  const chainMult = 1 + comboBonus + elementBonus + sameBonus;
+  const hasChainBonus = chainMult > 1.0001;
+
   let totalDmg = 0;
 
   setMessage(`<span>${char.name}の <strong>${card.emoji}${card.name}</strong>！</span>`);
   SOUND.sfx(mainEl);
 
   for (let i = 0; i < hits; i++) {
-    let dmg = Math.round(calcPower(card, char, useFocus) * mult);
+    let dmg = Math.round(calcPower(card, char, useFocus) * mult * chainMult);
     state.enemy.currentHp = Math.max(0, state.enemy.currentHp - dmg);
     totalDmg += dmg;
     spawnEffect(mainEl);
     spawnParticles(mainEl);
-    spawnDamage(dmg, wasAwaken ? 'crit' : (mult >= 2 ? 'weak' : (mult <= 0.5 ? 'resist' : '')));
+    spawnDamage(dmg, wasAwaken || hasChainBonus ? 'crit' : (mult >= 2 ? 'weak' : (mult <= 0.5 ? 'resist' : '')));
     enemyHit();
-    shakeStage(mult >= 2 || wasAwaken);
+    shakeStage(mult >= 2 || wasAwaken || elementRun >= 3);
     SOUND.sfx(mult >= 2 ? 'weak' : (mult <= 0.5 ? 'resist' : 'hit'));
     updateEnemyHp();
     if (i < hits - 1) await sleep(180);
   }
   if (useFocus) state.focusBuff = false;
 
+  // コンボ表示（2枚目以降 or ボーナス発生時）
+  if (comboTotal >= 2 || hasChainBonus) {
+    showCombo(comboIdx, chainMult, elementRun, mainEl);
+    SOUND.sfx('combo');
+  }
+
   // ヒットワード
   if (mult === 0)      spawnHitWord('効果がない…', true);
   else if (mult >= 2)  spawnHitWord('こうかは ばつぐんだ！', false);
   else if (mult <= 0.5) spawnHitWord('こうかは いまひとつ…', true);
+  if (elementRun >= 3) spawnHitWord(`${ELEMENT_ICON[mainEl]} ${ELEMENT_NAME[mainEl]}属性 大連鎖！`, false);
 
   // メッセージ
   let dmgMsg = `<span class="msg-dmg">${totalDmg}</span>の ダメージ！`;
   if (wasAwaken) dmgMsg = `<span class="msg-awaken">⚡覚醒の一撃！</span> ` + dmgMsg;
+  if (hasChainBonus) dmgMsg += ` <span class="msg-awaken">(コンボ×${chainMult.toFixed(1)})</span>`;
   await sleep(120);
   setMessage(`<span>${char.name}の ${card.name}！ ${dmgMsg}</span>`);
 
@@ -495,12 +522,14 @@ async function playCardEffect(cardId, comboIdx, comboTotal) {
   }
 }
 
-function showCombo(idx) {
+function showCombo(idx, chainMult, elementRun, mainEl) {
   const layer = $('effect-layer');
   const el = document.createElement('div');
-  el.className = 'hit-word';
-  el.style.top = '18%';
-  el.textContent = `${idx} COMBO!`;
+  el.className = 'combo-word';
+  if (elementRun >= 2 && mainEl) el.classList.add(mainEl + '-combo');
+  el.style.top = '16%';
+  const multTxt = (chainMult && chainMult > 1.0001) ? ` <span class="combo-mult">×${chainMult.toFixed(1)}</span>` : '';
+  el.innerHTML = `<span class="combo-num">${idx}</span> COMBO${multTxt}`;
   layer.appendChild(el);
   setTimeout(() => el.remove(), 1000);
 }
