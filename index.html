@@ -26,7 +26,12 @@
       <div class="title-wrap">
         <h1 class="title-main">APTITUDE</h1>
         <p class="title-sub">得意なことほど、コストがかからない</p>
-        <button class="primary-btn big-btn" id="start-btn">▶ ゲームスタート</button>
+        <div class="title-buttons">
+          <button class="primary-btn big-btn" id="start-btn">▶ あたらしい冒険</button>
+          <button class="secondary-btn" id="continue-btn" style="display:none">⏵ つづきから</button>
+          <button class="secondary-btn" id="records-btn">📖 きろく・ずかん</button>
+        </div>
+        <div id="title-stats" class="title-stats"></div>
         <div class="title-hint">
           <span>🔥火</span><span>💧水</span><span>💨風</span><span>🪨土</span>
           <p>4属性の適性でコストが変わるカードバトル</p>
@@ -146,8 +151,16 @@
       <div id="confetti-layer" class="confetti-layer"></div>
       <h2 id="end-title" class="end-title"></h2>
       <p id="end-message" class="screen-sub"></p>
-      <button id="restart-btn" class="primary-btn big-btn">もう一度遊ぶ</button>
+      <button id="restart-btn" class="primary-btn big-btn">タイトルへ</button>
     </section>
+
+    <!-- 記録・図鑑モーダル -->
+    <div id="records-panel" class="detail-panel hidden">
+      <div class="detail-content records-content">
+        <button class="close-btn" id="close-records">×</button>
+        <div id="records-body"></div>
+      </div>
+    </div>
 
   </div>
 
