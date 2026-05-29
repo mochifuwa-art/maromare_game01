@@ -360,6 +360,27 @@ button { font-family: inherit; cursor: pointer; border: none; outline: none; }
   100% { transform: translate(-50%,-80%) scale(1); opacity: 0; }
 }
 
+/* コンボ表示 */
+.combo-word {
+  position: absolute; right: 12px; top: 16%;
+  font-size: 26px; font-weight: 900; font-style: italic;
+  color: #fff; text-shadow: 0 2px 0 #000, 0 0 14px var(--accent);
+  animation: comboWord 1s cubic-bezier(0.22,1,0.36,1) forwards;
+  z-index: 8; white-space: nowrap;
+}
+.combo-word .combo-num { color: var(--accent); font-size: 34px; }
+.combo-word .combo-mult { color: var(--gold); }
+.combo-word.fire-combo  { text-shadow: 0 2px 0 #000, 0 0 18px var(--fire); }
+.combo-word.water-combo { text-shadow: 0 2px 0 #000, 0 0 18px var(--water); }
+.combo-word.wind-combo  { text-shadow: 0 2px 0 #000, 0 0 18px var(--wind); }
+.combo-word.earth-combo { text-shadow: 0 2px 0 #000, 0 0 18px var(--earth); }
+@keyframes comboWord {
+  0%   { transform: translateX(40px) scale(0.4) rotate(-8deg); opacity: 0; }
+  25%  { transform: translateX(0) scale(1.25) rotate(-4deg); opacity: 1; }
+  70%  { transform: translateX(0) scale(1) rotate(-4deg); opacity: 1; }
+  100% { transform: translateX(-12px) scale(0.95) rotate(-4deg); opacity: 0; }
+}
+
 /* 攻撃エフェクト本体 */
 .fx {
   position: absolute; left: 50%; top: 34%; transform: translate(-50%,-50%);
