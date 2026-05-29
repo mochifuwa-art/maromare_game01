@@ -2,87 +2,113 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>APTITUDE v0.1</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0f1119" />
+  <title>APTITUDE</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="app">
-    <!-- Title Screen -->
+
+    <!-- 縦持ち時の回転案内 -->
+    <div id="rotate-notice">
+      <div class="rotate-inner">
+        <div class="rotate-icon">📱</div>
+        <p class="rotate-text">スマホを<strong>横向き</strong>にしてね</p>
+        <p class="rotate-sub">横画面でプレイするゲームです</p>
+      </div>
+    </div>
+
+    <!-- Title -->
     <section id="title-screen" class="screen active">
       <div class="title-wrap">
         <h1 class="title-main">APTITUDE</h1>
-        <p class="title-sub">適性 — 得意なことほど、コストがかからない</p>
-        <p class="title-version">v0.1 — ローグライク / デッキビルダー</p>
-        <button class="primary-btn" id="start-btn">ランを開始</button>
+        <p class="title-sub">得意なことほど、コストがかからない</p>
+        <button class="primary-btn big-btn" id="start-btn">▶ ゲームスタート</button>
         <div class="title-hint">
-          <p>4属性（火・水・風・土）の適性でカードコストが変動</p>
-          <p>不得意なほど苦労が溜まり、限界で覚醒する</p>
+          <span>🔥火</span><span>💧水</span><span>💨風</span><span>🪨土</span>
+          <p>4属性の適性でコストが変わるカードバトル</p>
         </div>
       </div>
+      <button id="mute-btn-title" class="mute-btn-corner" title="サウンド切替">🔊</button>
     </section>
 
     <!-- Character Select -->
     <section id="character-select-screen" class="screen">
-      <h2 class="screen-title">キャラクターを選択</h2>
-      <div id="character-choices" class="choices-grid"></div>
+      <h2 class="screen-title">仲間をえらぶ</h2>
+      <p class="screen-sub">得意属性のカードが安く撃てる。クセを見て選ぼう</p>
+      <div id="character-choices" class="choices-row"></div>
     </section>
 
     <!-- Combat -->
     <section id="combat-screen" class="screen">
-      <div class="combat-top">
-        <div class="stage-info">
-          <span id="stage-label">Stage 1-1</span>
-          <span id="turn-counter">残り — ターン</span>
-          <span id="run-progress"></span>
+      <!-- 上部バー -->
+      <div class="top-bar">
+        <div class="top-left">
+          <span id="stage-label" class="stage-chip">1-1</span>
+          <span id="run-progress" class="progress-chip"></span>
         </div>
-        <div class="enemy-area">
-          <div id="enemy-visual" class="enemy-visual"></div>
-          <div class="enemy-info">
-            <div id="enemy-name" class="enemy-name"></div>
-            <div class="hp-bar-wrap">
-              <div id="enemy-hp-fill" class="hp-bar-fill"></div>
-              <div id="enemy-hp-text" class="hp-bar-text"></div>
+        <div id="turn-counter" class="turn-chip">残り — ターン</div>
+        <button id="mute-btn" class="mute-btn">🔊</button>
+      </div>
+
+      <!-- バトルステージ -->
+      <div class="battle-stage">
+        <!-- 左: キャラ -->
+        <div class="side-col side-left">
+          <div id="character-panel" class="character-panel"></div>
+        </div>
+
+        <!-- 中央: 敵 + エフェクト -->
+        <div class="center-stage" id="center-stage">
+          <div class="enemy-zone">
+            <div id="enemy-visual" class="enemy-visual"></div>
+            <div class="enemy-info">
+              <div id="enemy-name" class="enemy-name"></div>
+              <div class="hp-bar-wrap big">
+                <div id="enemy-hp-fill" class="hp-bar-fill"></div>
+                <div id="enemy-hp-text" class="hp-bar-text"></div>
+              </div>
+              <div id="enemy-affinity" class="enemy-affinity"></div>
             </div>
-            <div id="enemy-affinity" class="enemy-affinity"></div>
           </div>
+          <div id="effect-layer" class="effect-layer"></div>
+          <div id="battle-message" class="battle-message"></div>
         </div>
-        <div id="floating-damage" class="floating-damage"></div>
-      </div>
 
-      <div class="play-zone">
-        <div id="play-log" class="play-log"></div>
-      </div>
-
-      <div class="combat-mid">
-        <div class="mp-area">
-          <span class="mp-label">MP</span>
-          <div class="mp-bar-wrap">
-            <div id="mp-fill" class="mp-bar-fill"></div>
-            <div id="mp-text" class="mp-bar-text"></div>
+        <!-- 右: MP/デッキ -->
+        <div class="side-col side-right">
+          <div class="mp-block">
+            <div class="mp-label">MP</div>
+            <div class="mp-bar-wrap">
+              <div id="mp-fill" class="mp-bar-fill"></div>
+              <div id="mp-text" class="mp-bar-text"></div>
+            </div>
           </div>
+          <div class="deck-block">
+            <div class="deck-stat">🂠 山札 <strong id="draw-count">0</strong></div>
+            <div class="deck-stat">🗑 捨札 <strong id="discard-count">0</strong></div>
+          </div>
+          <div id="focus-indicator" class="focus-indicator hidden">🎯 集中中<br>次撃+20</div>
         </div>
-        <div class="deck-stats">
-          <span>デッキ残り: <strong id="draw-count">0</strong></span>
-          <span>捨て山: <strong id="discard-count">0</strong></span>
-          <span id="focus-indicator" class="focus-indicator hidden">✨集中中（次撃+20）</span>
+      </div>
+
+      <!-- 手札ドック -->
+      <div class="hand-dock">
+        <div id="hand-area" class="hand-area"></div>
+        <div class="action-col">
+          <div class="queue-info">
+            <span><strong id="queue-count">0</strong>枚</span>
+            <span class="queue-mp"><strong id="queue-cost">0</strong>MP</span>
+          </div>
+          <button id="execute-btn" class="primary-btn execute-btn" disabled>⚡ こうげき</button>
+          <button id="end-turn-btn" class="secondary-btn end-btn">ターン終了</button>
         </div>
       </div>
 
-      <div id="hand-area" class="hand-area"></div>
-
-      <div class="queue-bar">
-        <span class="queue-info"><strong id="queue-count">0</strong> 枚選択 / <strong id="queue-cost">0</strong> MP消費予定</span>
-        <button id="execute-btn" class="primary-btn execute-btn">⚡ 発動</button>
-        <button id="clear-btn" class="secondary-btn">クリア</button>
-      </div>
-
-      <div class="combat-bottom">
-        <div id="character-panel" class="character-panel"></div>
-        <button id="end-turn-btn" class="secondary-btn">ターン終了</button>
-      </div>
-
-      <!-- Detail panel (toggled) -->
+      <!-- キャラ詳細 -->
       <div id="detail-panel" class="detail-panel hidden">
         <div class="detail-content">
           <button class="close-btn" id="close-detail">×</button>
@@ -91,36 +117,38 @@
       </div>
     </section>
 
-    <!-- Reward Screen -->
+    <!-- Reward -->
     <section id="reward-screen" class="screen">
-      <h2 class="screen-title">カード報酬</h2>
-      <p class="screen-sub">1枚を選んでデッキに追加（スキップも可）</p>
-      <div id="reward-choices" class="choices-grid"></div>
+      <h2 class="screen-title">🎁 カード報酬</h2>
+      <p class="screen-sub">1枚えらんでデッキに加える</p>
+      <div id="reward-choices" class="choices-row"></div>
       <button id="skip-reward-btn" class="secondary-btn">スキップ</button>
     </section>
 
-    <!-- Shop Screen -->
+    <!-- Shop -->
     <section id="shop-screen" class="screen">
-      <h2 class="screen-title">ショップ</h2>
-      <div class="shop-gold">所持ゴールド: <strong id="shop-gold">0</strong> G</div>
-      <div id="shop-items" class="choices-grid"></div>
+      <h2 class="screen-title">🏪 ショップ</h2>
+      <div class="shop-gold">所持 <strong id="shop-gold">0</strong> G</div>
+      <div id="shop-items" class="choices-row"></div>
       <div class="shop-actions">
-        <button id="remove-card-btn" class="secondary-btn">カードを除外 (30G)</button>
-        <button id="leave-shop-btn" class="primary-btn">ショップを出る</button>
+        <button id="remove-card-btn" class="secondary-btn">🗑 カード除外 (30G)</button>
+        <button id="leave-shop-btn" class="primary-btn">出発する ▶</button>
       </div>
       <div id="remove-list" class="remove-list hidden">
-        <h3>除外するカードを選択</h3>
-        <div id="remove-cards"></div>
-        <button id="cancel-remove-btn" class="secondary-btn">キャンセル</button>
+        <h3>除外するカードをえらぶ</h3>
+        <div id="remove-cards" class="choices-row"></div>
+        <button id="cancel-remove-btn" class="secondary-btn">やめる</button>
       </div>
     </section>
 
-    <!-- End Screen -->
+    <!-- End -->
     <section id="end-screen" class="screen">
-      <h2 id="end-title" class="screen-title"></h2>
+      <div id="confetti-layer" class="confetti-layer"></div>
+      <h2 id="end-title" class="end-title"></h2>
       <p id="end-message" class="screen-sub"></p>
-      <button id="restart-btn" class="primary-btn">タイトルへ戻る</button>
+      <button id="restart-btn" class="primary-btn big-btn">もう一度遊ぶ</button>
     </section>
+
   </div>
 
   <script src="game.js"></script>
