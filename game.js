@@ -82,6 +82,7 @@ const state = {
   enemy: null, enemyMaxHp: 0,
   stageIndex: 0, gold: 0,
   turnsLeft: 0, maxTurns: 0,
+  redrawsLeft: 0, maxRedraws: 2,
 };
 let _nextInstanceId = 1;
 const mkInstance = (cardId) => ({ instanceId: _nextInstanceId++, cardId });
@@ -210,6 +211,7 @@ function saveRun(screen) {
     enemy: state.enemy, enemyMaxHp: state.enemyMaxHp,
     stageIndex: state.stageIndex, gold: state.gold,
     turnsLeft: state.turnsLeft, maxTurns: state.maxTurns,
+    redrawsLeft: state.redrawsLeft, maxRedraws: state.maxRedraws,
   }});
 }
 
@@ -286,6 +288,7 @@ function startCombat(stage) {
   state.executing = false;
   state.maxTurns = stage.turns;
   state.turnsLeft = stage.turns;
+  state.redrawsLeft = state.maxRedraws;
   state.drawPile = shuffle(state.deck.slice());
   state.discardPile = [];
   state.hand = [];
@@ -297,11 +300,13 @@ function startCombat(stage) {
 
 function drawHand() {
   const skipped = [];
+  let reshuffled = false;
   while (state.hand.length < 4) {
     if (state.drawPile.length === 0) {
       if (state.discardPile.length === 0) break;
       state.drawPile = shuffle(state.discardPile);
       state.discardPile = [];
+      reshuffled = true;
     }
     const cardId = state.drawPile.shift();
     const card = CARD_BY_ID[cardId];
@@ -309,6 +314,7 @@ function drawHand() {
     state.hand.push(mkInstance(cardId));
   }
   state.discardPile.push(...skipped);
+  return reshuffled;
 }
 
 function endTurn() {
@@ -326,9 +332,12 @@ function endTurn() {
     setTimeout(() => showEndScreen(false), 800);
     return;
   }
-  drawHand();
+  state.redrawsLeft = state.maxRedraws;
+  const reshuffled = drawHand();
   renderCombat();
-  setMessage(`<span class="msg-system">ターンを 終えた（残り ${state.turnsLeft}）</span>`);
+  let msg = `ターンを 終えた（残り ${state.turnsLeft}ターン）`;
+  if (reshuffled) msg += ' ／ 🂠山札を 切り直した';
+  setMessage(`<span class="msg-system">${msg}</span>`);
   saveRun('combat');
 }
 
@@ -347,16 +356,38 @@ function toggleQueue(instanceId) {
   else {
     const inst = state.hand.find(h => h.instanceId === instanceId);
     if (!inst) return;
-    const cost = calcCost(CARD_BY_ID[inst.cardId], state.character);
-    if (cost > getAvailableMP()) { SOUND.sfx('error'); return; }
+    // 選択は自由（攻撃はMP内、交換はMP不問）。MP超過の判定は発動時に行う
     state.queue.push(instanceId); SOUND.sfx('select');
   }
   renderCombat();
 }
 
+// 選択したカードを捨てて、同じ枚数を引き直す（手札交換）
+function swapSelected() {
+  if (state.executing || state.queue.length === 0) return;
+  if (state.redrawsLeft <= 0) { SOUND.sfx('error'); return; }
+  const ids = state.queue.slice();
+  const n = ids.length;
+  ids.forEach(iid => {
+    const inst = state.hand.find(h => h.instanceId === iid);
+    if (inst) state.discardPile.push(inst.cardId);
+  });
+  state.hand = state.hand.filter(h => !ids.includes(h.instanceId));
+  state.queue = [];
+  state.redrawsLeft--;
+  const reshuffled = drawHand();
+  SOUND.sfx('wind');
+  renderCombat();
+  let msg = `${n}枚を 交換した（こうかん 残り${state.redrawsLeft}回）`;
+  if (reshuffled) msg += ' ／ 🂠山札を 切り直した';
+  setMessage(`<span class="msg-system">${msg}</span>`);
+  saveRun('combat');
+}
+
 // ---------- 発動 ----------
 async function executeQueue() {
   if (state.executing || state.queue.length === 0) return;
+  if (getAvailableMP() < 0) { SOUND.sfx('error'); return; }
   state.executing = true;
   const ids = state.queue.slice();
   state.queue = [];
@@ -612,17 +643,18 @@ function renderCombat() {
   tc.textContent = `残り ${state.turnsLeft} ターン`;
   tc.classList.toggle('danger', state.turnsLeft <= 1);
 
-  // MP
-  const avail = getAvailableMP();
-  $('mp-text').textContent = state.queue.length > 0 ? `${avail}/${state.mpMax}` : `${state.mp}/${state.mpMax}`;
-  $('mp-fill').style.width = (avail / state.mpMax * 100) + '%';
+  // MP（選択ぶんを引いた残量。マイナス＝MP不足は0表示）
+  const selCost = state.mp - getAvailableMP();
+  const availClamped = Math.max(0, state.mp - selCost);
+  $('mp-text').textContent = state.queue.length > 0 ? `${availClamped}/${state.mpMax}` : `${state.mp}/${state.mpMax}`;
+  $('mp-fill').style.width = (availClamped / state.mpMax * 100) + '%';
 
-  // デッキ
+  // 山札・捨札
   $('draw-count').textContent = state.drawPile.length;
   $('discard-count').textContent = state.discardPile.length;
   $('focus-indicator').classList.toggle('hidden', !state.focusBuff);
 
-  // 手札
+  // 手札（選択は自由。単体で現在MPを超える攻撃カードは警告表示だが、交換用に選択は可能）
   const handArea = $('hand-area');
   handArea.innerHTML = '';
   state.hand.forEach((inst) => {
@@ -630,18 +662,28 @@ function renderCombat() {
     const cost = calcCost(card, state.character);
     const qIdx = state.queue.indexOf(inst.instanceId);
     const inQueue = qIdx >= 0;
-    const canAdd = inQueue || cost <= getAvailableMP();
-    const el = renderCard(card, { selected: inQueue, queueOrder: inQueue ? qIdx + 1 : null, unaffordable: !canAdd });
+    const tooExpensive = !inQueue && cost > state.mp;
+    const el = renderCard(card, { selected: inQueue, queueOrder: inQueue ? qIdx + 1 : null, unaffordable: tooExpensive });
     el.dataset.iid = inst.instanceId;
     if (state.executing) el.classList.add('locked');
     else el.addEventListener('click', () => toggleQueue(inst.instanceId));
     handArea.appendChild(el);
   });
 
-  // キュー情報・ボタン
-  $('queue-count').textContent = state.queue.length;
-  $('queue-cost').textContent = state.mp - getAvailableMP();
-  $('execute-btn').disabled = state.queue.length === 0 || state.executing;
+  // アクションボタン
+  const overBudget = selCost > state.mp;
+  const execBtn = $('execute-btn');
+  if (state.queue.length === 0) execBtn.textContent = '⚡ こうげき';
+  else if (overBudget) execBtn.textContent = '⚡ MPがたりない';
+  else execBtn.textContent = `⚡ こうげき (${selCost}MP)`;
+  execBtn.disabled = state.queue.length === 0 || overBudget || state.executing;
+
+  const swapBtn = $('swap-btn');
+  if (swapBtn) {
+    swapBtn.textContent = `🔄 こうかん (${state.redrawsLeft})`;
+    swapBtn.disabled = state.queue.length === 0 || state.redrawsLeft <= 0 || state.executing;
+  }
+
   $('end-turn-btn').disabled = state.executing;
 
   renderCharacterPanel();
@@ -969,6 +1011,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('restart-btn').addEventListener('click', () => { showScreen('title-screen'); renderTitleStats(); });
   $('end-turn-btn').addEventListener('click', endTurn);
   $('execute-btn').addEventListener('click', executeQueue);
+  $('swap-btn').addEventListener('click', swapSelected);
   $('character-panel').addEventListener('click', showCharacterDetail);
   $('close-detail').addEventListener('click', () => $('detail-panel').classList.add('hidden'));
   $('detail-panel').addEventListener('click', (e) => { if (e.target.id === 'detail-panel') $('detail-panel').classList.add('hidden'); });

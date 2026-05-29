@@ -93,8 +93,8 @@
             </div>
           </div>
           <div class="deck-block">
-            <div class="deck-stat">🂠 山札 <strong id="draw-count">0</strong></div>
-            <div class="deck-stat">🗑 捨札 <strong id="discard-count">0</strong></div>
+            <div class="deck-stat" title="これから引くカードの残り">🂠 ひく山 <strong id="draw-count">0</strong></div>
+            <div class="deck-stat" title="使った・交換したカード（山札が尽きると戻る）">🗑 すて札 <strong id="discard-count">0</strong></div>
           </div>
           <div id="focus-indicator" class="focus-indicator hidden">🎯 集中中<br>次撃+20</div>
         </div>
@@ -104,11 +104,8 @@
       <div class="hand-dock">
         <div id="hand-area" class="hand-area"></div>
         <div class="action-col">
-          <div class="queue-info">
-            <span><strong id="queue-count">0</strong>枚</span>
-            <span class="queue-mp"><strong id="queue-cost">0</strong>MP</span>
-          </div>
           <button id="execute-btn" class="primary-btn execute-btn" disabled>⚡ こうげき</button>
+          <button id="swap-btn" class="secondary-btn swap-btn" disabled>🔄 こうかん (2)</button>
           <button id="end-turn-btn" class="secondary-btn end-btn">ターン終了</button>
         </div>
       </div>

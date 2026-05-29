@@ -501,7 +501,9 @@ button { font-family: inherit; cursor: pointer; border: none; outline: none; }
 .queue-info { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); padding: 0 4px; }
 .queue-info strong { color: var(--accent); font-size: 15px; }
 .queue-mp strong { color: var(--water); }
-.execute-btn { padding: 12px; font-size: 16px; }
+.execute-btn { padding: 11px; font-size: 15px; }
+.swap-btn { padding: 9px; font-size: 13px; color: var(--water); border-color: rgba(74,144,226,0.55); }
+.swap-btn:not(:disabled) { background: rgba(74,144,226,0.12); }
 .end-btn { padding: 7px; font-size: 12px; }
 
 /* ========== カード ========== */
