@@ -172,6 +172,65 @@ function updateMuteButtons() {
 }
 
 // ============================================================
+//   セーブデータ（localStorage）
+//   - META: 永続データ（遊ぶほど増える記録・図鑑）
+//   - RUN : ラン途中状態（全滅 or クリアで破棄）
+// ============================================================
+const SAVE = {
+  META_KEY: 'aptitude_meta',
+  RUN_KEY: 'aptitude_run',
+  defaultMeta() {
+    return { plays: 0, wins: 0, bestStageIdx: -1, bestStageLabel: '—',
+      totalKills: 0, totalAwakenings: 0, maxCombo: 0,
+      charsSeen: [], enemiesSlain: [], cardsFound: [] };
+  },
+  loadMeta() {
+    try { return Object.assign(this.defaultMeta(), JSON.parse(localStorage.getItem(this.META_KEY) || '{}')); }
+    catch (e) { return this.defaultMeta(); }
+  },
+  saveMeta(m) { try { localStorage.setItem(this.META_KEY, JSON.stringify(m)); } catch (e) {} },
+  loadRun() { try { return JSON.parse(localStorage.getItem(this.RUN_KEY) || 'null'); } catch (e) { return null; } },
+  saveRun(o) { try { localStorage.setItem(this.RUN_KEY, JSON.stringify(o)); } catch (e) {} },
+  clearRun() { try { localStorage.removeItem(this.RUN_KEY); } catch (e) {} },
+  hasRun() { return !!this.loadRun(); },
+  resetAll() { try { localStorage.removeItem(this.META_KEY); localStorage.removeItem(this.RUN_KEY); } catch (e) {} },
+};
+let META = SAVE.loadMeta();
+
+const addToSet = (arr, id) => { if (id && !arr.includes(id)) arr.push(id); };
+function recordCardsFound(ids) { ids.forEach(id => addToSet(META.cardsFound, id)); SAVE.saveMeta(META); }
+
+// ラン状態のスナップショット保存（screen = combat | reward | shop）
+function saveRun(screen) {
+  saveRun.lastScreen = screen;
+  SAVE.saveRun({ screen, state: {
+    character: state.character, deck: state.deck,
+    drawPile: state.drawPile, discardPile: state.discardPile, hand: state.hand,
+    mp: state.mp, mpMax: state.mpMax, focusBuff: state.focusBuff,
+    enemy: state.enemy, enemyMaxHp: state.enemyMaxHp,
+    stageIndex: state.stageIndex, gold: state.gold,
+    turnsLeft: state.turnsLeft, maxTurns: state.maxTurns,
+  }});
+}
+
+function resumeRun() {
+  const run = SAVE.loadRun();
+  if (!run) return;
+  Object.assign(state, run.state);
+  state.executing = false;
+  state.queue = [];
+  SOUND.init();
+  if (run.screen === 'reward') { showRewardScreen(); }
+  else if (run.screen === 'shop') { showShopScreen(); }
+  else {
+    showScreen('combat-screen');
+    updateStageLabel();
+    renderCombat();
+    setMessage('<span class="msg-system">— 冒険を 再開した —</span>');
+  }
+}
+
+// ============================================================
 //   コアロジック
 // ============================================================
 function aptToStars(apt) {
@@ -219,7 +278,7 @@ function shuffle(arr) {
 // ============================================================
 function startCombat(stage) {
   const e = ENEMIES[stage.enemyId];
-  state.enemy = { ...e, currentHp: e.hp };
+  state.enemy = { ...e, id: stage.enemyId, currentHp: e.hp };
   state.enemyMaxHp = e.hp;
   state.mp = state.mpMax;
   state.focusBuff = false;
@@ -233,6 +292,7 @@ function startCombat(stage) {
   drawHand();
   renderCombat();
   setMessage(`<span class="msg-system">${e.name}が あらわれた！（${stage.turns}ターン以内に たおせ）</span>`);
+  saveRun('combat');
 }
 
 function drawHand() {
@@ -269,6 +329,7 @@ function endTurn() {
   drawHand();
   renderCombat();
   setMessage(`<span class="msg-system">ターンを 終えた（残り ${state.turnsLeft}）</span>`);
+  saveRun('combat');
 }
 
 // ---------- 選択キュー ----------
@@ -299,6 +360,7 @@ async function executeQueue() {
   state.executing = true;
   const ids = state.queue.slice();
   state.queue = [];
+  if (ids.length > META.maxCombo) { META.maxCombo = ids.length; SAVE.saveMeta(META); }
   renderCombat();
 
   for (let i = 0; i < ids.length; i++) {
@@ -318,7 +380,7 @@ async function executeQueue() {
 
   state.executing = false;
   if (state.enemy.currentHp <= 0) onEnemyDefeated();
-  else renderCombat();
+  else { renderCombat(); saveRun('combat'); }
 }
 
 async function playCardEffect(cardId, comboIdx, comboTotal) {
@@ -385,6 +447,7 @@ async function playCardEffect(cardId, comboIdx, comboTotal) {
       const add = Math.max(0, 100 - char.aptitude[mainEl]);
       char.exhaustion[mainEl] = Math.min(100, char.exhaustion[mainEl] + add);
       if (char.exhaustion[mainEl] >= 100) {
+        META.totalAwakenings++; SAVE.saveMeta(META);
         flashStage();
         glowPanel();
         SOUND.sfx('awaken');
@@ -499,6 +562,9 @@ function onEnemyDefeated() {
   setMessage(`<span class="msg-awaken">${e.name}を たおした！${e.gold ? ` +${e.gold}G` : ''}</span>`);
   state.gold += (e.gold || 0);
   if (e.gold) SOUND.sfx('gold');
+  META.totalKills++;
+  addToSet(META.enemiesSlain, e.id);
+  SAVE.saveMeta(META);
   setTimeout(() => {
     if (e.isBoss) { showEndScreen(true); return; }
     state.stageIndex++;
@@ -598,12 +664,12 @@ function renderCard(card, opts = {}) {
   const orderBadge = (selected && queueOrder) ? `<div class="queue-order">${queueOrder}</div>` : '';
   const costClass = cost === 0 ? 'card-cost-badge free' : 'card-cost-badge';
   const powerHtml = card.special === 'focus'
-    ? `<div class="card-power-badge support">🎯 +20</div>`
-    : `<div class="card-power-badge"><span class="sword">⚔</span>${card.hits ? `${power}×${card.hits}` : power}</div>`;
+    ? `<div class="card-power-badge support"><span class="pic">🎯</span><span class="pval">+20</span><span class="plabel">こうか</span></div>`
+    : `<div class="card-power-badge"><span class="pic">⚔</span><span class="pval">${card.hits ? `${power}×${card.hits}` : power}</span><span class="plabel">ダメージ</span></div>`;
 
   wrap.innerHTML = `
     ${rarityTag}${orderBadge}
-    <div class="${costClass}">${cost}</div>
+    <div class="${costClass}"><span class="cval">${cost}</span><span class="clabel">MP</span></div>
     <div class="card-art">${card.emoji}</div>
     <div class="card-name">${card.name}</div>
     <div class="card-desc">${card.desc}</div>
@@ -679,6 +745,10 @@ function selectCharacter(t) {
   state.deck = STARTER_DECK_IDS.slice();
   state.gold = 0;
   state.stageIndex = 0;
+  META.plays++;
+  addToSet(META.charsSeen, t.id);
+  STARTER_DECK_IDS.forEach(id => addToSet(META.cardsFound, id));
+  SAVE.saveMeta(META);
   proceedStage();
 }
 
@@ -704,9 +774,10 @@ function showRewardScreen() {
   choices.forEach(c => {
     const card = renderCard(c);
     card.classList.remove('unaffordable');
-    card.addEventListener('click', () => { SOUND.sfx('gold'); state.deck.push(c.id); state.stageIndex++; proceedStage(); });
+    card.addEventListener('click', () => { SOUND.sfx('gold'); state.deck.push(c.id); recordCardsFound([c.id]); state.stageIndex++; proceedStage(); });
     wrap.appendChild(card);
   });
+  saveRun('reward');
 }
 
 // ============================================================
@@ -745,9 +816,11 @@ function showShopScreen() {
       if (state.gold < item.price || card.classList.contains('bought')) { SOUND.sfx('error'); return; }
       state.gold -= item.price;
       state.deck.push(item.card.id);
+      recordCardsFound([item.card.id]);
       card.classList.add('bought');
       SOUND.sfx('gold');
       $('shop-gold').textContent = state.gold;
+      saveRun('shop');
       // 買えなくなった他カードを暗く
       document.querySelectorAll('#shop-items .shop-item:not(.bought)').forEach(el => {
         const p = parseInt(el.querySelector('.shop-price').textContent);
@@ -756,6 +829,7 @@ function showShopScreen() {
     });
     wrap.appendChild(card);
   });
+  saveRun('shop');
 }
 function showRemoveList() {
   const list = $('remove-list');
@@ -771,6 +845,7 @@ function showRemoveList() {
       SOUND.sfx('gold');
       $('shop-gold').textContent = state.gold;
       list.classList.add('hidden');
+      saveRun('shop');
     });
     wrap.appendChild(el);
   });
@@ -788,6 +863,12 @@ function showEndScreen(win) {
   $('end-message').innerHTML = win
     ? `${state.character.name}は 四元キメラを 討伐した！<br>所持G ${state.gold} ／ デッキ ${state.deck.length}枚`
     : `${state.enemy ? state.enemy.name : '敵'}を たおせなかった…<br>到達 Stage ${stage ? stage.label : '?'} ／ 所持G ${state.gold}`;
+  // 記録を更新し、ランは破棄（ローグライク）
+  if (win) { META.wins++; META.bestStageIdx = STAGE_ORDER.length; META.bestStageLabel = 'クリア'; }
+  else if (state.stageIndex > META.bestStageIdx) { META.bestStageIdx = state.stageIndex; META.bestStageLabel = stage ? stage.label : '—'; }
+  SAVE.saveMeta(META);
+  SAVE.clearRun();
+  renderTitleStats();
   SOUND.sfx(win ? 'win' : 'lose');
   if (win) spawnConfetti();
 }
@@ -808,6 +889,68 @@ function spawnConfetti() {
 }
 
 // ============================================================
+//   記録・図鑑
+// ============================================================
+function renderTitleStats() {
+  const m = META;
+  const el = $('title-stats');
+  if (el) {
+    el.innerHTML = m.plays === 0
+      ? '<span class="ts-empty">まだ冒険の記録がありません</span>'
+      : `<span>🎮 ${m.plays}回</span><span>🏆 ${m.wins}勝</span><span>📍 最高 ${m.bestStageLabel}</span>`;
+  }
+  const cont = $('continue-btn');
+  if (cont) cont.style.display = SAVE.hasRun() ? '' : 'none';
+}
+
+function showRecords() {
+  SOUND.sfx('select');
+  renderRecords();
+  $('records-panel').classList.remove('hidden');
+}
+
+function renderRecords() {
+  const m = META;
+  const winRate = m.plays > 0 ? Math.round(m.wins / m.plays * 100) : 0;
+  const stat = (icon, label, val) => `<div class="rec-stat"><div class="rec-stat-val">${val}</div><div class="rec-stat-lbl">${icon} ${label}</div></div>`;
+  const statsHtml = `<div class="rec-stats">
+    ${stat('🎮','プレイ', m.plays)}${stat('🏆','勝利', m.wins)}${stat('📈','勝率', winRate + '%')}
+    ${stat('📍','最高到達', m.bestStageLabel)}${stat('⚔','撃破', m.totalKills)}
+    ${stat('✨','覚醒', m.totalAwakenings)}${stat('🔥','最大コンボ', m.maxCombo)}
+  </div>`;
+
+  const cell = (seen, emoji, name, extra = '') =>
+    `<div class="zukan-cell ${seen ? '' : 'locked'} ${extra}">` +
+    (seen ? `<div class="zk-emoji">${emoji}</div><div class="zk-name">${name}</div>`
+          : `<div class="zk-emoji">❓</div><div class="zk-name">？？？</div>`) + '</div>';
+
+  const charHtml  = CHARACTER_POOL.map(c => cell(m.charsSeen.includes(c.id), c.emoji, c.name)).join('');
+  const enemyHtml = Object.entries(ENEMIES).map(([id, e]) => cell(m.enemiesSlain.includes(id), e.emoji, e.name)).join('');
+  const cardHtml  = CARDS.map(c => cell(m.cardsFound.includes(c.id), c.emoji, c.name, c.element[0] + '-card')).join('');
+
+  $('records-body').innerHTML = `
+    <h3 class="rec-title">📖 きろく・ずかん</h3>
+    ${statsHtml}
+    <h4 class="zukan-head">仲間 <span>${m.charsSeen.length}/${CHARACTER_POOL.length}</span></h4>
+    <div class="zukan-grid">${charHtml}</div>
+    <h4 class="zukan-head">モンスター <span>${m.enemiesSlain.length}/${Object.keys(ENEMIES).length}</span></h4>
+    <div class="zukan-grid">${enemyHtml}</div>
+    <h4 class="zukan-head">カード <span>${m.cardsFound.length}/${CARDS.length}</span></h4>
+    <div class="zukan-grid">${cardHtml}</div>
+    <button id="reset-records-btn" class="secondary-btn reset-btn">記録をすべて消す</button>
+  `;
+  $('reset-records-btn').addEventListener('click', () => {
+    if (confirm('すべての記録・図鑑・冒険データを消します。よろしいですか？')) {
+      SAVE.resetAll();
+      META = SAVE.loadMeta();
+      renderRecords();
+      renderTitleStats();
+      SOUND.sfx('error');
+    }
+  });
+}
+
+// ============================================================
 //   画面切替・初期化
 // ============================================================
 function showScreen(id) {
@@ -817,8 +960,13 @@ function showScreen(id) {
 
 document.addEventListener('DOMContentLoaded', () => {
   updateMuteButtons();
+  renderTitleStats();
   $('start-btn').addEventListener('click', () => { SOUND.init(); showCharacterSelect(); });
-  $('restart-btn').addEventListener('click', () => showScreen('title-screen'));
+  $('continue-btn').addEventListener('click', resumeRun);
+  $('records-btn').addEventListener('click', showRecords);
+  $('close-records').addEventListener('click', () => $('records-panel').classList.add('hidden'));
+  $('records-panel').addEventListener('click', (e) => { if (e.target.id === 'records-panel') $('records-panel').classList.add('hidden'); });
+  $('restart-btn').addEventListener('click', () => { showScreen('title-screen'); renderTitleStats(); });
   $('end-turn-btn').addEventListener('click', endTurn);
   $('execute-btn').addEventListener('click', executeQueue);
   $('character-panel').addEventListener('click', showCharacterDetail);
